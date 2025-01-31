@@ -8,12 +8,10 @@ from pytest_mock import MockerFixture
 
 # ============== Fixtures & Helpers ==============
 
+
 @pytest.fixture(scope="session")
 def spark():
-    from pyspark_huggingface.huggingface_sink import HuggingFaceSink
-
     spark = SparkSession.builder.getOrCreate()
-    spark.dataSource.register(HuggingFaceSink)
     yield spark
 
 
@@ -28,7 +26,7 @@ def load(repo, split):
 
 
 def writer(df: DataFrame):
-    return df.write.format("huggingfacesink").option("token", token())
+    return df.write.format("huggingface").option("token", token())
 
 
 @pytest.fixture(scope="session")
