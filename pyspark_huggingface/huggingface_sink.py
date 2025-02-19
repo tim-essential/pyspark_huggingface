@@ -160,7 +160,7 @@ class HuggingFaceDatasetsWriter(DataSourceArrowWriter):
         """
         Get all existing files of the current split.
         """
-        from huggingface_hub.errors import EntryNotFoundError
+        from huggingface_hub.utils import EntryNotFoundError
 
         try:
             objects = api.list_repo_tree(
