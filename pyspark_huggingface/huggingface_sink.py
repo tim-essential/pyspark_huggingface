@@ -150,7 +150,7 @@ class HuggingFaceDatasetsWriter(DataSourceArrowWriter):
     def _get_api(self):
         from huggingface_hub import HfApi
 
-        return HfApi(token=self.token, endpoint=self.endpoint)
+        return HfApi(token=self.token, endpoint=self.endpoint, library_name="pyspark_huggingface")
 
     @property
     def prefix(self) -> str:
