@@ -80,12 +80,14 @@ class HuggingFaceSource(DataSource):
 
         if "path" not in options or not options["path"]:
             raise Exception("You must specify a dataset name.")
-
+        
         kwargs = dict(self.options)
         self.dataset_name = kwargs.pop("path")
         self.config_name = kwargs.pop("config", None)
         self.split = kwargs.pop("split", self.DEFAULT_SPLIT)
+        self.revision = kwargs.pop("revision", None)
         self.streaming = kwargs.pop("streaming", "true").lower() == "true"
+        self.token = kwargs.pop("token", None)
         for arg in kwargs:
             if kwargs[arg].lower() == "true":
                 kwargs[arg] = True
@@ -96,8 +98,12 @@ class HuggingFaceSource(DataSource):
                     kwargs[arg] = ast.literal_eval(kwargs[arg])
                 except ValueError:
                     pass
+                    
+        # Raise the right error if the dataset doesn't exist
+        api = self._get_api()
+        api.repo_info(self.dataset_name, repo_type="dataset", revision=self.revision)
 
-        self.builder = load_dataset_builder(self.dataset_name, self.config_name, **kwargs)
+        self.builder = load_dataset_builder(self.dataset_name, self.config_name, token=self.token, revision=self.revision, **kwargs)
         streaming_dataset = self.builder.as_streaming_dataset()
         if self.split not in streaming_dataset:
             raise Exception(f"Split {self.split} is invalid. Valid options are {list(streaming_dataset)}")
@@ -105,6 +111,11 @@ class HuggingFaceSource(DataSource):
         self.streaming_dataset = streaming_dataset[self.split]
         if not self.streaming_dataset.features:
             self.streaming_dataset = self.streaming_dataset._resolve_features()
+
+    def _get_api(self):
+        from huggingface_hub import HfApi
+
+        return HfApi(token=self.token, library_name="pyspark_huggingface")
 
     @classmethod
     def name(cls):
