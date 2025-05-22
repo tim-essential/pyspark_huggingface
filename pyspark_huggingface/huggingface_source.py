@@ -2,9 +2,10 @@ import ast
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional, Sequence
 
-from pyspark.sql.datasource import DataSource, DataSourceReader, InputPartition
 from pyspark.sql.pandas.types import from_arrow_schema
 from pyspark.sql.types import StructType
+from pyspark_huggingface.compat.datasource import DataSource, DataSourceReader, InputPartition
+
 
 if TYPE_CHECKING:
     from datasets import DatasetBuilder, IterableDataset
@@ -124,7 +125,7 @@ class HuggingFaceSource(DataSource):
     def schema(self):
         return from_arrow_schema(self.streaming_dataset.features.arrow_schema)
 
-    def reader(self, schema: StructType) -> "DataSourceReader":
+    def reader(self, schema: StructType) -> "HuggingFaceDatasetsReader":
         return HuggingFaceDatasetsReader(
             schema,
             builder=self.builder,
@@ -148,7 +149,7 @@ class HuggingFaceDatasetsReader(DataSourceReader):
         self.streaming_dataset = streaming_dataset
         # Get and validate the split name
 
-    def partitions(self) -> Sequence[InputPartition]:
+    def partitions(self) -> Sequence[Shard]:
         if self.streaming_dataset:
             return [Shard(index=i) for i in range(self.streaming_dataset.num_shards)]
         else:
