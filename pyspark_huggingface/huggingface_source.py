@@ -82,13 +82,16 @@ class HuggingFaceSource(DataSource):
         if "path" not in options or not options["path"]:
             raise Exception("You must specify a dataset name.")
         
+        from huggingface_hub import get_token
+
         kwargs = dict(self.options)
         self.dataset_name = kwargs.pop("path")
         self.config_name = kwargs.pop("config", None)
         self.split = kwargs.pop("split", self.DEFAULT_SPLIT)
         self.revision = kwargs.pop("revision", None)
         self.streaming = kwargs.pop("streaming", "true").lower() == "true"
-        self.token = kwargs.pop("token", None)
+        self.token = kwargs.pop("token", None) or get_token()
+        self.endpoint = kwargs.pop("endpoint", None)
         for arg in kwargs:
             if kwargs[arg].lower() == "true":
                 kwargs[arg] = True
@@ -116,7 +119,7 @@ class HuggingFaceSource(DataSource):
     def _get_api(self):
         from huggingface_hub import HfApi
 
-        return HfApi(token=self.token, library_name="pyspark_huggingface")
+        return HfApi(token=self.token, endpoint=self.endpoint, library_name="pyspark_huggingface")
 
     @classmethod
     def name(cls):

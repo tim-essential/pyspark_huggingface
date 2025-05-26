@@ -1,10 +1,9 @@
-from typing import TYPE_CHECKING, Iterator, Optional, Union
+from typing import TYPE_CHECKING, Iterator, List, Optional, Union
 
 import pyspark
-from packaging import version
 
 
-if version.parse(pyspark.__version__) >= version.parse("4.0.0.dev2"):
+if int(pyspark.__version__.split(".")[0]) >= 4 and ("dev0" not in pyspark.__version__ and "dev1" not in pyspark.__version__):
     from pyspark.sql.datasource import DataSource, DataSourceArrowWriter, DataSourceReader, DataSourceWriter, InputPartition, WriterCommitMessage
 else:
     class DataSource:
@@ -18,8 +17,9 @@ else:
         ...
     
     class DataSourceWriter:
-        ...
-    
+        def __init__(self, options):
+            self.options = options
+
     class InputPartition:
         ...
     
@@ -27,63 +27,71 @@ else:
         ...
     
 
-    import os
     import logging
+    import os
+    import pickle
 
-    from pyspark.sql.readwriter import DataFrameReader as _DataFrameReader
+    from pyspark.sql.readwriter import DataFrameReader as _DataFrameReader, DataFrameWriter as _DataFrameWriter
 
     if TYPE_CHECKING:
-        import pyarrow as pa
+        from pyarrow import RecordBatch
         from pyspark.sql.dataframe import DataFrame
         from pyspark.sql.readwriter import PathOrPaths
         from pyspark.sql.types import StructType
         from pyspark.sql._typing import OptionalPrimitiveType
 
 
-    _orig_format = _DataFrameReader.format
+    class _ArrowPickler:
+
+        def __init__(self, key: str):
+            from pyspark.sql.types import StructType, StructField, BinaryType
+
+            self.key = key
+            self.schema = StructType([StructField(self.key, BinaryType(), True)])
+        
+        def dumps(self, obj):
+            return {self.key: pickle.dumps(obj)}
+
+        def loads(self, obj):
+            return pickle.loads(obj[self.key])
+    
+    # Reader
+
+    def _read_in_arrow(batches: Iterator["RecordBatch"], arrow_pickler, hf_reader) -> Iterator["RecordBatch"]:
+        for batch in batches:
+            for record in batch.to_pylist():
+                partition = arrow_pickler.loads(record)
+                yield from hf_reader.read(partition)
+
+    _orig_reader_format = _DataFrameReader.format
 
     def _new_format(self: _DataFrameReader, source: str) -> _DataFrameReader:
         self._format = source
-        return _orig_format(self, source)
+        return _orig_reader_format(self, source)
     
     _DataFrameReader.format = _new_format
 
-    _orig_option = _DataFrameReader.option
+    _orig_reader_option = _DataFrameReader.option
 
     def _new_option(self: _DataFrameReader, key, value) -> _DataFrameReader:
         if not hasattr(self, "_options"):
             self._options = {}
         self._options[key] = value
-        return _orig_option(self, key, value)
+        return _orig_reader_option(self, key, value)
     
-    _DataFrameReader.option = _orig_option
+    _DataFrameReader.option = _new_option
 
-    _orig_options = _DataFrameReader.options
+    _orig_reader_options = _DataFrameReader.options
 
     def _new_options(self: _DataFrameReader, **options) -> _DataFrameReader:
         if not hasattr(self, "_options"):
             self._options = {}
         self._options.update(options)
-        return _orig_options(self, **options)
+        return _orig_reader_options(self, **options)
     
-    _DataFrameReader.options = _orig_options
+    _DataFrameReader.options = _new_options
 
-    _orig_load = _DataFrameReader.load
-
-    class _unpack_dict(dict):
-        ...
-
-    class _ArrowPipe:
-
-        def __init__(self, *fns):
-            self.fns = fns
-
-        def __call__(self, iterator: Iterator["pa.RecordBatch"]):
-            for record_batch in iterator:
-                for data in record_batch.to_pylist():
-                    for fn in self.fns:
-                        data = fn(**data) if isinstance(data, _unpack_dict) else fn(data)
-                    yield from data
+    _orig_reader_load = _DataFrameReader.load
 
     def _new_load(
         self: _DataFrameReader,
@@ -93,21 +101,87 @@ else:
         **options: "OptionalPrimitiveType",
     ) -> "DataFrame":
         if (format or getattr(self, "_format", None)) == "huggingface":
-            from dataclasses import asdict
+            from functools import partial
             from pyspark_huggingface.huggingface import HuggingFaceDatasets
             
             source = HuggingFaceDatasets(options={**getattr(self, "_options", {}), **options, "path": path}).get_source()
             schema = schema or source.schema()
-            reader = source.reader(schema)
-            partitions = reader.partitions()
-            partition_cls = type(partitions[0])
-            rdd = self._spark.sparkContext.parallelize([asdict(partition) for partition in partitions], len(partitions))
+            hf_reader = source.reader(schema)
+            partitions = hf_reader.partitions()
+            arrow_pickler = _ArrowPickler("partition")
+            rdd = self._spark.sparkContext.parallelize([arrow_pickler.dumps(partition) for partition in partitions], len(partitions))
             df = self._spark.createDataFrame(rdd)
-            return df.mapInArrow(_ArrowPipe(_unpack_dict, partition_cls, reader.read), schema)
+            return df.mapInArrow(partial(_read_in_arrow, arrow_pickler=arrow_pickler, hf_reader=hf_reader), schema)
             
-        return _orig_load(self, path=path, format=format, schema=schema, **options)
+        return _orig_reader_load(self, path=path, format=format, schema=schema, **options)
 
     _DataFrameReader.load = _new_load
+
+    # Writer
+
+    def _write_in_arrow(batches: Iterator["RecordBatch"], arrow_pickler, hf_writer) -> Iterator["RecordBatch"]:
+        from pyarrow import RecordBatch
+
+        commit_message = hf_writer.write(batches)
+        yield RecordBatch.from_pylist([arrow_pickler.dumps(commit_message)])
+
+    _orig_writer_format = _DataFrameWriter.format
+
+    def _new_format(self: _DataFrameWriter, source: str) -> _DataFrameWriter:
+        self._format = source
+        return _orig_writer_format(self, source)
+    
+    _DataFrameWriter.format = _new_format
+
+    _orig_writer_option = _DataFrameWriter.option
+
+    def _new_option(self: _DataFrameWriter, key, value) -> _DataFrameWriter:
+        if not hasattr(self, "_options"):
+            self._options = {}
+        self._options[key] = value
+        return _orig_writer_option(self, key, value)
+    
+    _DataFrameWriter.option = _new_option
+
+    _orig_writer_options = _DataFrameWriter.options
+
+    def _new_options(self: _DataFrameWriter, **options) -> _DataFrameWriter:
+        if not hasattr(self, "_options"):
+            self._options = {}
+        self._options.update(options)
+        return _orig_writer_options(self, **options)
+    
+    _DataFrameWriter.options = _new_options
+
+    _orig_writer_save = _DataFrameWriter.save
+
+    def _new_save(
+        self: _DataFrameWriter,
+        path: Optional["PathOrPaths"] = None,
+        format: Optional[str] = None,
+        mode: Optional[Union["StructType", str]] = None,
+        partitionBy: Optional[Union[str, List[str]]] = None,
+        **options: "OptionalPrimitiveType",
+    ) -> "DataFrame":
+        if (format or getattr(self, "_format", None)) == "huggingface":
+            from functools import partial
+            from pyspark_huggingface.huggingface import HuggingFaceDatasets
+
+            sink = HuggingFaceDatasets(options={**getattr(self, "_options", {}), **options, "path": path}).get_sink()
+            schema = self._df.schema
+            mode = options.pop("mode", None)
+            hf_writer = sink.writer(schema, overwrite=(mode == "overwrite"))
+            arrow_pickler = _ArrowPickler("commit_message")
+            commit_messages = self._df.mapInArrow(partial(_write_in_arrow, arrow_pickler=arrow_pickler, hf_writer=hf_writer), arrow_pickler.schema).collect()
+            commit_messages = [arrow_pickler.loads(commit_message) for commit_message in commit_messages]
+            hf_writer.commit(commit_messages)
+            return
+            
+        return _orig_writer_save(self, path=path, format=format, schema=schema, **options)
+
+    _DataFrameWriter.save = _new_save
+
+    # Log only in driver
 
     if not os.environ.get("SPARK_ENV_LOADED"):
         logging.getLogger(__name__).warning(f"huggingface datasource enabled for pyspark {pyspark.__version__} (backport from pyspark 4)")
