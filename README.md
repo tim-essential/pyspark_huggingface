@@ -1,16 +1,21 @@
-# pyspark_huggingface
+<p align="center">
+  <img alt="Hugging Face x Spark" src="https://pbs.twimg.com/media/FvN1b_2XwAAWI1H?format=jpg&name=large" width="352" style="max-width: 100%;">
+  <br/>
+  <br/>
+</p>
 
 <p align="center">
     <a href="https://github.com/huggingface/pyspark_huggingface/releases"><img alt="GitHub release" src="https://img.shields.io/github/release/huggingface/pyspark_huggingface.svg"></a>
     <a href="https://huggingface.co/datasets/"><img alt="Number of datasets" src="https://img.shields.io/endpoint?url=https://huggingface.co/api/shields/datasets&color=brightgreen"></a>
 </p>
 
+# Spark Data Source for Hugging Face Datasets
+
 A Spark Data Source for accessing [🤗 Hugging Face Datasets](https://huggingface.co/datasets):
 
-- Stream datasets directly from Hugging Face to your Spark application
-- Select subsets and splits
-- Apply projection and predicate filters for Parquet datasets
-- Push Spark DataFrames as Parquet files the Hugging Face Dataset Hub
+- Stream datasets from Hugging Face as Spark DataFrames
+- Select subsets and splits, apply projection and predicate filters
+- Save Spark DataFrames as Parquet files to Hugging Face
 - Fully distributed
 - Authentication via `huggingface-cli login` or tokens
 - Compatible with Spark 4 (with auto-import)
