@@ -30,6 +30,7 @@ else:
     import logging
     import os
     import pickle
+    from functools import wraps
 
     from pyspark.sql.readwriter import DataFrameReader as _DataFrameReader, DataFrameWriter as _DataFrameWriter
 
@@ -65,6 +66,7 @@ else:
 
     _orig_reader_format = _DataFrameReader.format
 
+    @wraps(_orig_reader_format)
     def _new_format(self: _DataFrameReader, source: str) -> _DataFrameReader:
         self._format = source
         return _orig_reader_format(self, source)
@@ -73,6 +75,7 @@ else:
 
     _orig_reader_option = _DataFrameReader.option
 
+    @wraps(_orig_reader_option)
     def _new_option(self: _DataFrameReader, key, value) -> _DataFrameReader:
         if not hasattr(self, "_options"):
             self._options = {}
@@ -83,6 +86,7 @@ else:
 
     _orig_reader_options = _DataFrameReader.options
 
+    @wraps(_orig_reader_options)
     def _new_options(self: _DataFrameReader, **options) -> _DataFrameReader:
         if not hasattr(self, "_options"):
             self._options = {}
@@ -93,6 +97,7 @@ else:
 
     _orig_reader_load = _DataFrameReader.load
 
+    @wraps(_orig_reader_load)
     def _new_load(
         self: _DataFrameReader,
         path: Optional["PathOrPaths"] = None,
@@ -127,6 +132,7 @@ else:
 
     _orig_writer_format = _DataFrameWriter.format
 
+    @wraps(_orig_writer_format)
     def _new_format(self: _DataFrameWriter, source: str) -> _DataFrameWriter:
         self._format = source
         return _orig_writer_format(self, source)
@@ -135,6 +141,7 @@ else:
 
     _orig_writer_option = _DataFrameWriter.option
 
+    @wraps(_orig_writer_option)
     def _new_option(self: _DataFrameWriter, key, value) -> _DataFrameWriter:
         if not hasattr(self, "_options"):
             self._options = {}
@@ -145,6 +152,7 @@ else:
 
     _orig_writer_options = _DataFrameWriter.options
 
+    @wraps(_orig_writer_options)
     def _new_options(self: _DataFrameWriter, **options) -> _DataFrameWriter:
         if not hasattr(self, "_options"):
             self._options = {}
@@ -155,6 +163,7 @@ else:
 
     _orig_writer_save = _DataFrameWriter.save
 
+    @wraps(_orig_writer_save)
     def _new_save(
         self: _DataFrameWriter,
         path: Optional["PathOrPaths"] = None,
