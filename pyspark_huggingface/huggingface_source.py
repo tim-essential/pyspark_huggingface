@@ -34,7 +34,7 @@ class HuggingFaceSource(DataSource):
 
     Load a public dataset from the HuggingFace Hub.
 
-    >>> df = spark.read.format("huggingface").load("imdb")
+    >>> df = spark.read.format("huggingface").load("stanfordnlp/imdb")
     DataFrame[text: string, label: bigint]
 
     >>> df.show()
@@ -48,7 +48,7 @@ class HuggingFaceSource(DataSource):
 
     Load a specific split from a public dataset from the HuggingFace Hub.
 
-    >>> spark.read.format("huggingface").option("split", "test").load("imdb").show()
+    >>> spark.read.format("huggingface").option("split", "test").load("stanfordnlp/imdb").show()
     +--------------------+-----+
     |                text|label|
     +--------------------+-----+
