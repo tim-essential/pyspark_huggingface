@@ -107,6 +107,7 @@ else:
     ) -> "DataFrame":
         if (format or getattr(self, "_format", None)) == "huggingface":
             from functools import partial
+            from pyspark.sql import SparkSession
             from pyspark_huggingface.huggingface import HuggingFaceDatasets
             
             source = HuggingFaceDatasets(options={**getattr(self, "_options", {}), **options, "path": path}).get_source()
@@ -114,8 +115,9 @@ else:
             hf_reader = source.reader(schema)
             partitions = hf_reader.partitions()
             arrow_pickler = _ArrowPickler("partition")
-            rdd = self._spark.sparkContext.parallelize([arrow_pickler.dumps(partition) for partition in partitions], len(partitions))
-            df = self._spark.createDataFrame(rdd)
+            spark = self._spark if isinstance(self._spark, SparkSession) else self.spark._sc  # _spark is SQLContext for older versions
+            rdd = spark.sparkContext.parallelize([arrow_pickler.dumps(partition) for partition in partitions], len(partitions))
+            df = spark.createDataFrame(rdd)
             return df.mapInArrow(partial(_read_in_arrow, arrow_pickler=arrow_pickler, hf_reader=hf_reader), schema)
             
         return _orig_reader_load(self, path=path, format=format, schema=schema, **options)
