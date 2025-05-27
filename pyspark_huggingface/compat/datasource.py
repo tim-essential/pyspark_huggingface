@@ -115,7 +115,7 @@ else:
             hf_reader = source.reader(schema)
             partitions = hf_reader.partitions()
             arrow_pickler = _ArrowPickler("partition")
-            spark = self._spark if isinstance(self._spark, SparkSession) else self.spark._sc  # _spark is SQLContext for older versions
+            spark = self._spark if isinstance(self._spark, SparkSession) else self._spark._sc  # _spark is SQLContext for older versions
             rdd = spark.sparkContext.parallelize([arrow_pickler.dumps(partition) for partition in partitions], len(partitions))
             df = spark.createDataFrame(rdd)
             return df.mapInArrow(partial(_read_in_arrow, arrow_pickler=arrow_pickler, hf_reader=hf_reader), schema)
