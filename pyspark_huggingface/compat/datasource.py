@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING, Iterator, List, Optional, Union
 import pyspark
 
 
-if int(pyspark.__version__.split(".")[0]) >= 4 and ("dev0" not in pyspark.__version__ and "dev1" not in pyspark.__version__):
+if int(pyspark.__version__.split(".")[0]) >= 4 and pyspark.__version__ not in ("4.0.0.dev0", "4.0.0.dev1"):
     from pyspark.sql.datasource import DataSource, DataSourceArrowWriter, DataSourceReader, DataSourceWriter, InputPartition, WriterCommitMessage
 else:
     class DataSource:
