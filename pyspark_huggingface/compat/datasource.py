@@ -3,9 +3,9 @@ from typing import TYPE_CHECKING, Iterator, List, Optional, Union
 import pyspark
 
 
-if int(pyspark.__version__.split(".")[0]) >= 4 and pyspark.__version__ not in ("4.0.0.dev0", "4.0.0.dev1"):
+try:
     from pyspark.sql.datasource import DataSource, DataSourceArrowWriter, DataSourceReader, DataSourceWriter, InputPartition, WriterCommitMessage
-else:
+except ImportError:
     class DataSource:
         def __init__(self, options):
             self.options = options
