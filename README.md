@@ -32,6 +32,7 @@ pip install pyspark_huggingface
 Load a dataset (here [stanfordnlp/imdb](https://huggingface.co/datasets/stanfordnlp/imdb)):
 
 ```python
+import pyspark_huggingface
 df = spark.read.format("huggingface").load("stanfordnlp/imdb")
 ```
 
