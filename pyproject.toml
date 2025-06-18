@@ -1,24 +1,30 @@
-[tool.poetry]
-name = "pyspark_huggingface"
+[project]
+name = "pyspark-huggingface-fork"
 version = "1.0.0"
 description = "A DataSource for reading and writing HuggingFace Datasets in Spark"
-authors = ["allisonwang-db <allison.wang@databricks.com>", "lhoestq <quentin@huggingface.co>"]
-license = "Apache License 2.0"
+authors = [
+    {name = "allisonwang-db", email = "allison.wang@databricks.com"},
+    {name = "lhoestq", email = "quentin@huggingface.co"}
+]
+license = {text = "Apache License 2.0"}
 readme = "README.md"
-packages = [
-    { include = "pyspark_huggingface" },
+requires-python = ">=3.9"
+dependencies = [
+    "datasets>=3.2",
+    "huggingface_hub>=0.27.1",
+    "pyspark>=3.3"
 ]
 
-[tool.poetry.dependencies]
-python = "^3.9"
-datasets = "^3.2"
-huggingface_hub = "^0.27.1"
-
-[tool.poetry.group.dev.dependencies]
-pytest = "^8.0.0"
-pytest-dotenv = "^0.5.2"
-pytest-mock = "^3.14.0"
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-dotenv>=0.5.2",
+    "pytest-mock>=3.14.0"
+]
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["pyspark_huggingface"]
