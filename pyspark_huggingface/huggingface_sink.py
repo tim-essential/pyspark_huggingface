@@ -1,5 +1,7 @@
 import ast
 import logging
+import random
+import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Iterator, List, Optional, Union
 
@@ -20,6 +22,7 @@ if TYPE_CHECKING:
     from pyarrow import RecordBatch
 
 logger = logging.getLogger(__name__)
+
 
 class HuggingFaceSink(DataSource):
     """
@@ -75,6 +78,8 @@ class HuggingFaceSink(DataSource):
         self.revision = kwargs.pop("revision", None)
         self.token = kwargs.pop("token", None) or get_token()
         self.endpoint = kwargs.pop("endpoint", None)
+        self.max_bytes_per_file = kwargs.pop("max_bytes_per_file", 500_000_000)
+        self.max_operations_per_commit = kwargs.pop("max_operations_per_commit", 100)
         for arg in kwargs:
             if kwargs[arg].lower() == "true":
                 kwargs[arg] = True
@@ -91,7 +96,9 @@ class HuggingFaceSink(DataSource):
     def name(cls):
         return "huggingfacesink"
 
-    def writer(self, schema: StructType, overwrite: bool) -> "HuggingFaceDatasetsWriter":
+    def writer(
+        self, schema: StructType, overwrite: bool
+    ) -> "HuggingFaceDatasetsWriter":
         return HuggingFaceDatasetsWriter(
             repo_id=self.repo_id,
             path_in_repo=self.path_in_repo,
@@ -101,6 +108,8 @@ class HuggingFaceSink(DataSource):
             overwrite=overwrite,
             token=self.token,
             endpoint=self.endpoint,
+            max_bytes_per_file=self.max_bytes_per_file,
+            max_operations_per_commit=self.max_operations_per_commit,
             **self.kwargs,
         )
 
@@ -152,7 +161,9 @@ class HuggingFaceDatasetsWriter(DataSourceArrowWriter):
     def _get_api(self):
         from huggingface_hub import HfApi
 
-        return HfApi(token=self.token, endpoint=self.endpoint, library_name="pyspark_huggingface")
+        return HfApi(
+            token=self.token, endpoint=self.endpoint, library_name="pyspark_huggingface"
+        )
 
     @property
     def prefix(self) -> str:
@@ -274,29 +285,30 @@ class HuggingFaceDatasetsWriter(DataSourceArrowWriter):
                 )
                 yield CommitOperationDelete(path_in_repo=old_path)
 
+        self.overwrite = True  # Hardcoding this
         # In overwrite mode, delete existing files
-        if self.overwrite:
-            for obj in self._list_split(api):
-                # Delete old file
-                operations[obj.path] = CommitOperationDelete(
-                    path_in_repo=obj.path, is_folder=isinstance(obj, RepoFolder)
-                )
+        # if self.overwrite:
+        # for obj in self._list_split(api):
+        #     # Delete old file
+        #     operations[obj.path] = CommitOperationDelete(
+        #         path_in_repo=obj.path, is_folder=isinstance(obj, RepoFolder)
+        #     )
         # In append mode, rename existing files to have the correct total number of parts
-        else:
-            rename_operations = []
-            existing = list(
-                obj for obj in self._list_split(api) if isinstance(obj, RepoFile)
-            )
-            count_existing = len(existing)
-            for i, obj in enumerate(existing):
-                new_path = format_path(i)
-                rename_operations.extend(rename(obj.path, new_path))
-            # Rename files in a separate commit to prevent them from being overwritten by new files of the same name
-            self._create_commits(
-                api,
-                operations=rename_operations,
-                message="Rename existing files before uploading new files using PySpark",
-            )
+        # else:
+        #     rename_operations = []
+        #     existing = list(
+        #         obj for obj in self._list_split(api) if isinstance(obj, RepoFile)
+        #     )
+        #     count_existing = len(existing)
+        #     for i, obj in enumerate(existing):
+        #         new_path = format_path(i)
+        #         rename_operations.extend(rename(obj.path, new_path))
+        #     # Rename files in a separate commit to prevent them from being overwritten by new files of the same name
+        #     self._create_commits(
+        #         api,
+        #         operations=rename_operations,
+        #         message="Rename existing files before uploading new files using PySpark",
+        #     )
 
         # Rename additions, putting them after existing files if any
         for i, addition in enumerate(additions):
@@ -319,6 +331,7 @@ class HuggingFaceDatasetsWriter(DataSourceArrowWriter):
         The HuggingFace API may time out if there are too many operations in a single commit.
         """
         import math
+        from huggingface_hub.errors import HfHubHTTPError
 
         num_commits = math.ceil(len(operations) / self.max_operations_per_commit)
         for i in range(num_commits):
@@ -328,13 +341,36 @@ class HuggingFaceDatasetsWriter(DataSourceArrowWriter):
             commit_message = message + (
                 f" (part {i:05d}-of-{num_commits:05d})" if num_commits > 1 else ""
             )
-            api.create_commit(
-                repo_id=self.repo_id,
-                repo_type=self.repo_type,
-                revision=self.revision,
-                operations=part,
-                commit_message=commit_message,
-            )
+
+            # Retry with exponential backoff for rate limiting
+            max_retries = 15
+            base_delay = 1  # Start with 1 second
+
+            for attempt in range(max_retries + 1):
+                try:
+                    api.create_commit(
+                        repo_id=self.repo_id,
+                        repo_type=self.repo_type,
+                        revision=self.revision,
+                        operations=part,
+                        commit_message=commit_message,
+                    )
+                    break  # Success, exit retry loop
+                except HfHubHTTPError as e:
+                    if e.response.status_code == 429 and attempt < max_retries:
+                        # Rate limited, wait with exponential backoff + jitter
+                        base_exponential_delay = base_delay * (2**attempt)
+                        # Add equal jitter: half fixed delay + half random delay
+                        jitter = random.uniform(0, base_exponential_delay)
+                        delay = base_exponential_delay / 2 + jitter / 2
+                        logger.warning(
+                            f"Rate limited on commit attempt {attempt + 1}/{max_retries + 1}. "
+                            f"Retrying in {delay:.2f} seconds..."
+                        )
+                        time.sleep(delay)
+                    else:
+                        # Not rate limited or max retries exceeded, re-raise the error
+                        raise
 
     def abort(self, messages: List[HuggingFaceCommitMessage]) -> None:  # type: ignore[override]
         # We don't need to do anything here, as the files are not included in the repo until commit
